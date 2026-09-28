@@ -1,0 +1,35 @@
+name: Extract ZIP from Data URL
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Decode Data URL and extract ZIP
+        run: |
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+
+          data_url = Path("save.txt").read_text(encoding="utf-8").strip()
+          header = "data:application/zip;base64,"
+          if not data_url.startswith(header):
+              raise ValueError("save.txt does not contain the expected ZIP Data URL")
+
+          zip_bytes = base64.b64decode(data_url[len(header):], validate=True)
+          Path("archive.zip").write_bytes(zip_bytes)
+          PY
+
+          mkdir -p extracted
+          unzip -o archive.zip -d extracted
+
+      - name: Upload extracted files
+        uses: actions/upload-artifact@v4
+        with:
+          name: extracted-files
+          path: extracted/
