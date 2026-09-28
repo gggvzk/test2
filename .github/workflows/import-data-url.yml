@@ -1,0 +1,67 @@
+name: Import ZIP data URL into repository
+
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: write
+
+concurrency:
+  group: import-data-url
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decode and safely extract ZIP
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64
+          import io
+          import pathlib
+          import re
+          import zipfile
+
+          source = pathlib.Path("data-url.txt")
+          if not source.is_file():
+              raise SystemExit("Missing data-url.txt. Put the complete data:application/zip;base64,... URL there.")
+
+          data_url = source.read_text(encoding="utf-8").strip()
+          match = re.fullmatch(r"data:application/zip;base64,([A-Za-z0-9+/=\s]+)", data_url)
+          if not match:
+              raise SystemExit("data-url.txt is not a valid ZIP base64 data URL.")
+
+          raw = base64.b64decode(re.sub(r"\s+", "", match.group(1)), validate=True)
+          with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+              root = pathlib.Path(".")
+
+              # Reject absolute paths and traversal before extracting.
+              for member in archive.infolist():
+                  target = (root / member.filename).resolve()
+                  if target != root.resolve() and root.resolve() not in target.parents:
+                      raise SystemExit(f"Unsafe ZIP path: {member.filename}")
+              archive.extractall(root)
+
+          print("ZIP extracted.")
+          PY
+
+      - name: Remove source data URL
+        run: rm -f data-url.txt
+
+      - name: Commit and push imported files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Import files from ZIP data URL"
+            git push
+          fi
